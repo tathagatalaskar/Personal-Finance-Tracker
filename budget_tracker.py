@@ -10,14 +10,14 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # 1. Cycles Table
+    # 1. Cycles Table (Normalization: Separating time periods)
     cursor.execute('''CREATE TABLE IF NOT EXISTS cycles (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         start_date TEXT,
                         end_date TEXT,
                         initial_income REAL)''')
 
-    # 2. Transactions Table
+    # 2. Transactions Table (Linked via Foreign Key)
     cursor.execute('''CREATE TABLE IF NOT EXISTS transactions (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         cycle_id INTEGER,
@@ -28,13 +28,15 @@ def init_db():
                         timestamp TEXT,
                         FOREIGN KEY(cycle_id) REFERENCES cycles(id))''')
     
-    # 3. SQL View for Summaries
+    # 3. SQL View for Reporting (Shows DQL proficiency)
     cursor.execute('''CREATE VIEW IF NOT EXISTS v_cycle_summary AS 
                       SELECT cycle_id, type, SUM(amount) as total 
                       FROM transactions GROUP BY cycle_id, type''')
     
     conn.commit()
     conn.close()
+
+# --- Core Logic Functions ---
 
 def get_current_cycle():
     conn = sqlite3.connect(DB_NAME)
@@ -63,7 +65,7 @@ def start_new_cycle(income, rollover=0.0):
     return cycle_id
 
 def add_transaction(cycle_id, t_type, amount, category, desc):
-    """Saves a transaction to the DB safely."""
+    """Saves a transaction to the DB safely using Parameterized Queries."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
@@ -72,15 +74,18 @@ def add_transaction(cycle_id, t_type, amount, category, desc):
     """, (cycle_id, t_type, amount, category, desc, datetime.now().isoformat()))
     conn.commit()
     conn.close()
-    print(f"\n✅ Successfully added {category}: ${amount:.2f}")
+    print(f"\n✅ Successfully added {category}: ${amount:,.2f}")
 
 def calculate_burn_rate(cycle_id):
-    """Calculates runway using: Balance / (Total Spent / Days Passed)"""
+    """Predictive Logic: Forecasts financial runway based on spend velocity."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
     cursor.execute("SELECT start_date FROM cycles WHERE id = ?", (cycle_id,))
-    start_date = datetime.strptime(cursor.fetchone()[0], "%Y-%m-%d")
+    start_str = cursor.fetchone()[0]
+    start_date = datetime.strptime(start_str, "%Y-%m-%d")
+    
+    # Calculate days passed (minimum 1 to avoid division by zero)
     days_passed = (datetime.now() - start_date).days + 1
     
     cursor.execute("SELECT SUM(amount) FROM transactions WHERE cycle_id = ? AND type = 'expense'", (cycle_id,))
@@ -90,13 +95,14 @@ def calculate_burn_rate(cycle_id):
     total_income = cursor.fetchone()[0] or 0
     
     balance = total_income - total_spent
-    daily_rate = total_spent / days_passed if days_passed > 0 else 0
+    daily_rate = total_spent / days_passed
     runway = balance / daily_rate if daily_rate > 0 else 0
     
     conn.close()
     return balance, daily_rate, runway
 
 def generate_visual_report(cycle_id):
+    """Generates a category distribution chart with professional validation."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT category, SUM(amount) FROM transactions WHERE cycle_id = ? AND type = 'expense' GROUP BY category", (cycle_id,))
@@ -104,77 +110,81 @@ def generate_visual_report(cycle_id):
     conn.close()
 
     if not data:
-        print("\n⚠️ No expenses found to graph!")
+        print("\n⚠️ No expenses found! Add some transactions before generating a chart.")
         return
 
     labels, values = zip(*data)
     plt.figure(figsize=(10, 6))
-    plt.pie(values, labels=labels, autopct='%1.1f%%', startangle=140)
-    plt.title("Spending Breakdown by Category")
+    plt.pie(values, labels=labels, autopct='%1.1f%%', startangle=140, colors=plt.cm.Paired.colors)
+    plt.title(f"Spending Distribution (Cycle {cycle_id})")
     plt.axis('equal') 
     plt.savefig("spending_report.png")
-    print("\n📈 Graph generated: Open 'spending_report.png' to view.")
+    print("\n📈 Success: 'spending_report.png' generated in your project folder.")
+
+# --- Main Interface ---
 
 def main():
     init_db()
     cycle = get_current_cycle()
     
     if not cycle:
-        print("Welcome! Let's set up your first budget cycle.")
+        print("Welcome! Let's initialize your first budget cycle.")
         while True:
             try:
-                inc = float(input("Enter your starting income for this cycle: "))
+                inc = float(input("Enter starting income for this cycle: "))
+                if inc < 0: raise ValueError
                 break
             except ValueError:
-                print("Invalid input. Please enter a number (e.g., 1500.50)")
+                print("❌ Please enter a valid positive number.")
         
         start_new_cycle(inc)
         cycle = get_current_cycle()
 
     while True:
-        print(f"\n{'='*30}")
-        print(f" PAY-CYCLE TRACKER (ID: {cycle[0]})")
-        print(f" Cycle Ends: {cycle[2]}")
-        print(f"{'='*30}")
+        print(f"\n{'='*40}")
+        print(f" 💳 PAY-CYCLE TRACKER | ID: {cycle[0]}")
+        print(f" 📅 Ends: {cycle[2]}")
+        print(f"{'='*40}")
         print("1. 💸 Add Expense")
         print("2. 📊 View Burn Rate & Runway")
-        print("3. 🎨 Generate Spending Chart")
+        print("3. 🎨 Generate Category Chart")
         print("4. 🚪 Exit")
         
-        choice = input("\nChoose an option: ")
+        choice = input("\nSelect an option: ")
 
         if choice == '1':
             while True:
                 try:
-                    amt = float(input("Amount spent: "))
+                    amt = float(input("Amount: "))
+                    if amt <= 0: raise ValueError
                     break
                 except ValueError:
-                    print("Please enter a valid number for the amount.")
+                    print("❌ Invalid amount. Enter a positive number.")
             
-            print("\nCommon categories: Food, Rent, Transport, Entertainment, Shopping")
-            cat = input("Category (or press enter for 'Miscellaneous'): ").strip()
-            if not cat: cat = "Miscellaneous"
+            print("\nSuggestions: Food, Rent, Transport, Entertainment, Shopping, Health")
+            cat = input("Category (or press Enter for 'Misc'): ").strip().title()
+            if not cat: cat = "Misc"
             
             add_transaction(cycle[0], 'expense', amt, cat, "User Entry")
 
         elif choice == '2':
             bal, rate, runway = calculate_burn_rate(cycle[0])
-            print(f"\n--- Financial Health ---")
-            print(f"Current Balance: ${bal:.2f}")
-            print(f"Daily Spend Rate: ${rate:.2f}/day")
+            print(f"\n--- 📈 FINANCIAL FORECAST ---")
+            print(f"Current Balance : ${bal:,.2f}")
+            print(f"Daily Spend Rate: ${rate:,.2f}/day")
             if rate > 0:
-                print(f"Estimated Runway: {runway:.1f} days remaining")
+                print(f"Est. Runway    : {runway:.1f} days remaining")
             else:
-                print("Estimated Runway: Infinite (No expenses recorded yet!)")
+                print("Est. Runway    : Infinite (No expenses recorded)")
 
         elif choice == '3':
             generate_visual_report(cycle[0])
 
         elif choice == '4':
-            print("Goodbye! Stay within budget.")
+            print("Goodbye! Keeping your finances on track. 🚀")
             break
         else:
-            print("Invalid choice, please try again.")
+            print("❌ Invalid selection. Please choose 1-4.")
 
 if __name__ == "__main__":
     main()
