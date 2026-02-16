@@ -1,5 +1,3 @@
----
-
 # 💸 Pay-Cycle Finance Tracker (Pro)
 
 > **A Smart Financial Forecasting Tool built with Python & SQLite**
