@@ -77,6 +77,18 @@ def start_new_cycle(income, rollover=0.0):
     conn.commit()
     conn.close()
     return cycle_id
+    
+def add_transaction(cycle_id, t_type, amount, category, desc):
+    """Adds an expense or income to the transactions table."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO transactions (cycle_id, type, category, amount, description, timestamp) 
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (cycle_id, t_type, amount, category, desc, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    print(f"Success: Added {t_type} of ${amount:.2f} in category '{category}'.")
 
 def calculate_burn_rate(cycle_id):
     """Predictive Logic: Forecasts financial runway."""
